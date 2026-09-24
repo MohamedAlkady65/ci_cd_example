@@ -1,0 +1,35 @@
+{
+  "name": "ci-cd-example",
+  "version": "1.0.0",
+  "description": "Minimal Express API used as an example for CI/CD setup",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "jest": {
+    "testEnvironment": "node"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "jest": "^30.5.2",
+    "prettier": "^3.9.9",
+    "supertest": "^7.3.0"
+  }
+}
