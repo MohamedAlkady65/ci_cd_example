@@ -20,7 +20,7 @@ env:
 jobs:
   checks:
     name: Lint, format & test (container)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v5
 
@@ -34,18 +34,13 @@ jobs:
         run: docker run --rm "$CI_IMAGE" npm run format:check
 
       - name: Run tests with coverage
-        run: docker run --rm -v "$PWD/coverage:/app/coverage" "$CI_IMAGE" npm run test:coverage
+        run: docker run --rm "$CI_IMAGE" npm run test
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: coverage/
 
   build:
     name: Build & smoke test production image
     needs: checks
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v5
 
