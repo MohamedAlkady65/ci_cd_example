@@ -20,7 +20,7 @@ env:
 jobs:
   checks:
     name: Lint, format & test (container)
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, linux, ci-machine]
     steps:
       - uses: actions/checkout@v5
 
@@ -39,7 +39,7 @@ jobs:
   build:
     name: Build & smoke test production image
     needs: checks
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, linux, ci-machine]
     steps:
       - uses: actions/checkout@v5
 
