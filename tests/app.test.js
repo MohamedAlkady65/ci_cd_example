@@ -21,7 +21,7 @@ describe('POST /sum', () => {
   });
 
   test('returns 400 when a value is not a number', async () => {
-      const res = await request(app).post('/sum').send({ a: '2', b: 3 });
+    const res = await request(app).post('/sum').send({ a: '2', b: 3 });
     expect(res.status).toBe(400);
   });
 

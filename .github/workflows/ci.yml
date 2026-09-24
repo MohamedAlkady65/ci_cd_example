@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI_IMAGE: ci-cd-example:ci
+  APP_IMAGE: ci-cd-example:${{ github.sha }}
+
+jobs:
+  checks:
+    name: Lint, format & test (container)
+    runs-on: [self-hosted, linux, ci-machine]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build CI image
+        run: docker build --target ci -t "$CI_IMAGE" .
+
+      - name: Lint
+        run: docker run --rm "$CI_IMAGE" npm run lint:check
+
+      - name: Check formatting
+        run: docker run --rm "$CI_IMAGE" npm run format:check
+
+      - name: Run tests with coverage
+        run: docker run --rm "$CI_IMAGE" npm run test
+
+  build:
+    name: Build & smoke test production image
+    needs: checks
+    runs-on: [self-hosted, linux, ci-machine]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build production image
+        run: docker build --target production -t "$APP_IMAGE" .
+
+      - name: Start container
+        run: docker run -d --name app -p 3000:3000 "$APP_IMAGE"
+
+      - name: Smoke test POST /sum
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/sum -o /dev/null -X POST \
+              -H 'Content-Type: application/json' -d '{"a":2,"b":3}' && break
+            sleep 1
+          done
+          response=$(curl -sf -X POST http://localhost:3000/sum \
+            -H 'Content-Type: application/json' -d '{"a":2,"b":3}')
+          echo "Response: $response"
+          test "$response" = '{"result":5}'
+
+      - name: Container logs
+        if: always()
+        run: docker logs app
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f app
