@@ -36,7 +36,6 @@ jobs:
       - name: Run tests with coverage
         run: docker run --rm "$CI_IMAGE" npm run test
 
-
   build:
     name: Build & smoke test production image
     needs: checks
