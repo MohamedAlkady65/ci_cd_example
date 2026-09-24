@@ -13,6 +13,8 @@ npm run test:coverage
 
 ## API
 
+`GET /` → `{ "message": "Welcome to the ci-cd-example API!", "dateTime": "2026-09-24T12:00:00.000Z" }`
+
 `POST /sum` with JSON body `{ "a": 2, "b": 3 }` → `{ "result": 5 }`
 
 Returns `400` if `a` or `b` is missing or not a finite number.

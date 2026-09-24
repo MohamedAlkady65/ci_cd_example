@@ -14,13 +14,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CI_IMAGE: ci-cd-example:ci
-  APP_IMAGE: ci-cd-example:${{ github.sha }}
+  CI_IMAGE: ${{ vars.APP_NAME }}:ci
+  APP_IMAGE: ${{ vars.APP_NAME }}:${{ github.sha }}
 
 jobs:
   checks:
     name: Lint, format & test (container)
-    runs-on: [self-hosted, linux, ci-machine]
+    runs-on: [self-hosted, linux, '${{ vars.CI_RUNNER }}']
     steps:
       - uses: actions/checkout@v5
 
@@ -39,7 +39,7 @@ jobs:
   build:
     name: Build & smoke test production image
     needs: checks
-    runs-on: [self-hosted, linux, ci-machine]
+    runs-on: [self-hosted, linux, '${{ vars.CI_RUNNER }}']
     steps:
       - uses: actions/checkout@v5
 

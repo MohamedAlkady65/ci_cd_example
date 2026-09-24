@@ -1,6 +1,27 @@
 const request = require('supertest');
 const app = require('../src/app');
 
+describe('GET /', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('returns a welcome message with the current date and time', async () => {
+    jest.useFakeTimers({
+      now: new Date('2026-01-15T10:30:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate'],
+    });
+
+    const res = await request(app).get('/');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      message: 'Welcome to the ci-cd-example API!',
+      dateTime: '2026-01-15T10:30:00.000Z',
+    });
+  });
+});
+
 describe('POST /sum', () => {
   test('returns the sum of two numbers', async () => {
     const res = await request(app).post('/sum').send({ a: 2, b: 3 });
