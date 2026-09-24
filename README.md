@@ -42,3 +42,13 @@ Run the CI checks (lint, format, tests) in a container, the same way CI does:
 docker build --target ci -t ci-cd-example:ci .
 docker run --rm ci-cd-example:ci
 ```
+
+## Docker Compose
+
+`compose.yaml` needs `APP_NAME`, `CONTAINER_NAME`, `APP_PORT` and `IMAGE_TAG`. Copy `.env.example` to `.env` and adjust, then:
+
+```bash
+docker compose -f compose.yaml up -d --build
+docker compose -f compose.yaml logs -f
+docker compose -f compose.yaml down
+```

@@ -21,24 +21,31 @@ jobs:
       group: deploy-${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}
       cancel-in-progress: false
     env:
-      APP_IMAGE: ${{ vars.APP_NAME }}:${{ github.ref_name }}
-      CONTAINER_NAME: ${{ vars.APP_NAME }}-${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}
-      APP_PORT: ${{ vars.APP_PORT }}
+      ENV_FILE: ${{ vars.ENV_FILE }}
+      IMAGE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build production image
-        run: docker build --target production -t "$APP_IMAGE" .
-
-      - name: Replace running container
+      - name: Check env file exists
         run: |
-          docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-          docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
-            -p "$APP_PORT:3000" "$APP_IMAGE"
+          if [ -z "$ENV_FILE" ]; then
+            echo "::error::Set the ENV_FILE variable on the '${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}' environment"
+            exit 1
+          fi
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::Env file $ENV_FILE not found on this machine"
+            exit 1
+          fi
+
+      - name: Build production image
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" build
+
+      - name: Start container
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" up -d --no-build --wait
 
       - name: Container logs
         if: always()
-        run: docker logs "$CONTAINER_NAME" || true
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" logs || true
 
       - name: Remove dangling images
         if: always()

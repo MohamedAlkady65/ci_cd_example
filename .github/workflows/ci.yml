@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CI_IMAGE: ${{ vars.APP_NAME }}:ci
+  CI_IMAGE: ${{ vars.APP_NAME }}:ci-${{ github.sha }}
   APP_IMAGE: ${{ vars.APP_NAME }}:${{ github.sha }}
 
 jobs:
