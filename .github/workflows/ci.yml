@@ -13,48 +13,64 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CI_IMAGE: ci-cd-example:ci
+  APP_IMAGE: ci-cd-example:${{ github.sha }}
+
 jobs:
-  lint:
-    name: Lint & format
+  checks:
+    name: Lint, format & test (container)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-
-      - run: npm ci
+      - name: Build CI image
+        run: docker build --target ci -t "$CI_IMAGE" .
 
       - name: Lint
-        run: npm run lint
+        run: docker run --rm "$CI_IMAGE" npm run lint:check
 
       - name: Check formatting
-        run: npm run format:check
-
-  test:
-    name: Test (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22, 24]
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
-
-      - run: npm ci
+        run: docker run --rm "$CI_IMAGE" npm run format:check
 
       - name: Run tests with coverage
-        run: npm run test:coverage
+        run: docker run --rm -v "$PWD/coverage:/app/coverage" "$CI_IMAGE" npm run test:coverage
 
       - name: Upload coverage report
-        if: matrix.node-version == 24
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage/
+
+  build:
+    name: Build & smoke test production image
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build production image
+        run: docker build --target production -t "$APP_IMAGE" .
+
+      - name: Start container
+        run: docker run -d --name app -p 3000:3000 "$APP_IMAGE"
+
+      - name: Smoke test POST /sum
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/sum -o /dev/null -X POST \
+              -H 'Content-Type: application/json' -d '{"a":2,"b":3}' && break
+            sleep 1
+          done
+          response=$(curl -sf -X POST http://localhost:3000/sum \
+            -H 'Content-Type: application/json' -d '{"a":2,"b":3}')
+          echo "Response: $response"
+          test "$response" = '{"result":5}'
+
+      - name: Container logs
+        if: always()
+        run: docker logs app
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f app

@@ -26,3 +26,17 @@ npm run format         # Prettier, rewrite files
 npm run format:check   # Prettier, fail if files are not formatted
 npm run check          # lint + format:check + test (use in CI)
 ```
+
+## Docker
+
+```bash
+docker build -t ci-cd-example .
+docker run --rm -p 3000:3000 ci-cd-example
+```
+
+Run the CI checks (lint, format, tests) in a container, the same way CI does:
+
+```bash
+docker build --target ci -t ci-cd-example:ci .
+docker run --rm ci-cd-example:ci
+```
