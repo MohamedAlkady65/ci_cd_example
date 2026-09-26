@@ -36,6 +36,10 @@ jobs:
       - name: Run tests with coverage
         run: docker run --rm "$CI_IMAGE" npm run test
 
+      - name: Remove unused images
+        if: always()
+        run: docker image prune -a -f
+
   build:
     name: Build & smoke test production image
     needs: checks
@@ -68,3 +72,7 @@ jobs:
       - name: Stop container
         if: always()
         run: docker rm -f app
+
+      - name: Remove unused images
+        if: always()
+        run: docker image prune -a -f
