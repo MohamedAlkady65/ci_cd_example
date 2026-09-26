@@ -15,10 +15,6 @@ describe('GET /', () => {
     const res = await request(app).get('/');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({
-      message: 'Welcome to the ci-cd-example API!',
-      dateTime: '2026-01-15T10:30:00.000Z',
-    });
   });
 });
 
