@@ -45,7 +45,7 @@ docker run --rm ci-cd-example:ci
 
 ## Docker Compose
 
-`compose.yaml` needs `APP_NAME`, `CONTAINER_NAME`, `APP_PORT` and `IMAGE_TAG`. Copy `.env.example` to `.env` and adjust, then:
+`compose.yaml` needs `ENV`, `APP_NAME`, `APP_PORT` and `IMAGE_TAG`. Copy `.env.example` to `.env` and adjust, then:
 
 ```bash
 docker compose -f compose.yaml up -d --build

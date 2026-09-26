@@ -1,9 +1,9 @@
-name: ${CONTAINER_NAME:?CONTAINER_NAME is required}
+name: ${APP_NAME:?APP_NAME is required}-${ENV:?ENV is required}
 
 services:
   app:
-    image: ${APP_NAME:?APP_NAME is required}:${IMAGE_TAG:?IMAGE_TAG is required}
-    container_name: ${CONTAINER_NAME:?CONTAINER_NAME is required}
+    image: ${APP_NAME:?APP_NAME is required}-${ENV:?ENV is required}:${IMAGE_TAG:?IMAGE_TAG is required}
+    container_name: ${APP_NAME:?APP_NAME is required}-${ENV:?ENV is required}
     build:
       context: .
       target: production
