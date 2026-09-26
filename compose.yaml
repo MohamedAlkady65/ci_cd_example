@@ -1,0 +1,12 @@
+name: ${APP_NAME:?APP_NAME is required}-${ENV:?ENV is required}
+
+services:
+  app:
+    image: ${APP_NAME:?APP_NAME is required}-${ENV:?ENV is required}:${IMAGE_TAG:?IMAGE_TAG is required}
+    container_name: ${APP_NAME:?APP_NAME is required}-${ENV:?ENV is required}
+    build:
+      context: .
+      target: production
+    restart: unless-stopped
+    ports:
+      - '${APP_PORT:?APP_PORT is required}:3000'

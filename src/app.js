@@ -4,6 +4,13 @@ const sum = require('./sum');
 const app = express();
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Welcome to the ci-cd-example API!',
+    dateTime: new Date().toISOString(),
+  });
+});
+
 app.post('/sum', (req, res) => {
   const { a, b } = req.body ?? {};
 

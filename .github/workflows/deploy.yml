@@ -1,0 +1,52 @@
+name: deploy
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+' # v1.2.3 -> production
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+' # v1.2.3-rc.1 -> staging
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.ref_name }} to ${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}
+    runs-on:
+      - self-hosted
+      - linux
+      - ${{ vars[contains(github.ref_name, '-rc.') && 'STAGING_RUNNER' || 'PRODUCTION_RUNNER'] }}
+    environment: ${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}
+    concurrency:
+      group: deploy-${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}
+      cancel-in-progress: false
+    env:
+      ENV_FILE: ${{ vars.ENV_FILE }}
+      IMAGE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check env file exists
+        run: |
+          if [ -z "$ENV_FILE" ]; then
+            echo "::error::Set the ENV_FILE variable on the '${{ contains(github.ref_name, '-rc.') && 'staging' || 'production' }}' environment"
+            exit 1
+          fi
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::Env file $ENV_FILE not found on this machine"
+            exit 1
+          fi
+
+      - name: Build production image
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" build
+
+      - name: Start container
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" up -d --no-build --wait
+
+      - name: Container logs
+        if: always()
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" logs || true
+
+      - name: Remove dangling images
+        if: always()
+        run: docker image prune -f
