@@ -1,0 +1,66 @@
+name: _deploy
+
+# Reusable deploy job, called by release-deploy.yml, deploy-dev.yml and manual-deploy.yml
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment to deploy to (development, staging, production)
+        type: string
+        required: true
+      ref:
+        description: Commit SHA, branch or tag to check out
+        type: string
+        required: true
+      image_tag:
+        description: Docker image tag (only [A-Za-z0-9_.-] allowed)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.image_tag }} to ${{ inputs.environment }}
+    runs-on:
+      - self-hosted
+      - linux
+      - ${{ vars[inputs.environment == 'development' && 'DEVELOPMENT_RUNNER' || inputs.environment == 'staging' && 'STAGING_RUNNER' || 'PRODUCTION_RUNNER'] }}
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENV_FILE: ${{ vars.ENV_FILE }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Check env file exists
+        run: |
+          if [ -z "$ENV_FILE" ]; then
+            echo "::error::Set the ENV_FILE variable on the '${{ inputs.environment }}' environment"
+            exit 1
+          fi
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::Env file $ENV_FILE not found on this machine"
+            exit 1
+          fi
+
+      - name: Build production image
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" build
+
+      - name: Start container
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" up -d --no-build --wait
+
+      - name: Container logs
+        if: always()
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" logs || true
+
+      - name: Remove dangling images
+        if: always()
+        run: docker image prune -a -f
