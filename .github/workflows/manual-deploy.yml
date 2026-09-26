@@ -1,0 +1,91 @@
+name: manual-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        type: environment
+        required: true
+      ref:
+        description: Tag, branch or commit SHA to deploy (e.g. v1.2.3, main)
+        type: string
+        required: true
+
+run-name: Deploy ${{ inputs.ref }} to ${{ inputs.environment }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.ref }} to ${{ inputs.environment }}
+    runs-on:
+      - self-hosted
+      - linux
+      - ${{ vars[inputs.environment == 'staging' && 'STAGING_RUNNER' || 'PRODUCTION_RUNNER'] }}
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENV_FILE: ${{ vars.ENV_FILE }}
+    steps:
+      - name: Validate ref
+        id: ref
+        env:
+          REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+            echo "::error::Invalid ref '$REF': only letters, digits, '.', '_', '/' and '-' are allowed"
+            exit 1
+          fi
+          # Resolves branches, tags and (short) SHAs; returns the full commit SHA
+          if ! sha=$(curl -sf \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github.sha" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$REF"); then
+            echo "::error::Ref '$REF' not found in $GITHUB_REPOSITORY (no matching branch, tag or commit)"
+            exit 1
+          fi
+          echo "Ref '$REF' resolved to $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.ref.outputs.sha }}
+
+      - name: Set image tag
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          # Docker tags allow only [A-Za-z0-9_.-], max 128 chars (branches like feature/x need sanitizing)
+          tag=$(printf '%s' "$REF" | sed 's/[^A-Za-z0-9_.-]/-/g' | cut -c1-128)
+          echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "Deploying $REF (${{ steps.ref.outputs.sha }}) as image tag $tag"
+
+      - name: Check env file exists
+        run: |
+          if [ -z "$ENV_FILE" ]; then
+            echo "::error::Set the ENV_FILE variable on the '${{ inputs.environment }}' environment"
+            exit 1
+          fi
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::Env file $ENV_FILE not found on this machine"
+            exit 1
+          fi
+
+      - name: Build production image
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" build
+
+      - name: Start container
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" up -d --no-build --wait
+
+      - name: Container logs
+        if: always()
+        run: docker compose -f compose.yaml --env-file "$ENV_FILE" logs || true
+
+      - name: Remove dangling images
+        if: always()
+        run: docker image prune -a -f
