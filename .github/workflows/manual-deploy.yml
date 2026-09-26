@@ -23,7 +23,7 @@ jobs:
     runs-on:
       - self-hosted
       - linux
-      - ${{ vars[inputs.environment == 'staging' && 'STAGING_RUNNER' || 'PRODUCTION_RUNNER'] }}
+      - ${{ vars[inputs.environment == 'development' && 'DEVELOPMENT_RUNNER' || inputs.environment == 'staging' && 'STAGING_RUNNER' || 'PRODUCTION_RUNNER'] }}
     environment: ${{ inputs.environment }}
     concurrency:
       group: deploy-${{ inputs.environment }}
