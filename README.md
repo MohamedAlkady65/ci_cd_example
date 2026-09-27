@@ -69,7 +69,7 @@ All workflows live in `.github/workflows/` and run on **self-hosted Linux runner
 
 ### Design principle: minimal per-environment configuration
 
-The pipeline is intentionally built so that environments differ as little as possible. Configuration lives in exactly three places:
+The pipeline is intentionally built so that config per environment differ as little as possible and centerlized in few places. Configuration lives in exactly three places:
 
 | Where                              | What                                                                  | Changes                 |
 | ---------------------------------- | --------------------------------------------------------------------- | ----------------------- |
