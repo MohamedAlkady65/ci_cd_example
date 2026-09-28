@@ -6,7 +6,7 @@ app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'Welcome to the ci-cd-example API! this 2 release',
+    message: 'Welcome to the ci-cd-example API! this 98332 release',
     dateTime: new Date().toISOString(),
   });
 });
