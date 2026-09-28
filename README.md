@@ -88,23 +88,28 @@ When adding a setting, keep this split: if it differs between environments, put 
 flowchart LR
     PR[Push / PR to main or dev] --> CI[ci.yml<br/>lint, format, test, smoke test]
     DEV[Push to dev] --> DD[deploy-dev.yml]
-    TAG[Push tag v*] --> RD[release-deploy.yml]
+    RC[Manual run] --> DRC[deploy-release-candidate-to-staging.yml<br/>tag vX.Y.Z-rc.N]
+    REL[Manual run] --> DRL[deploy-release-to-production.yml<br/>merge to main, tag vX.Y.Z]
     MAN[Manual run] --> MD[manual-deploy.yml<br/>validate ref]
     DD --> R[_deploy.yml<br/>reusable deploy job]
-    RD --> R
+    DRC --> R
+    DRL --> R
     MD --> R
     R --> E1[(development)]
     R --> E2[(staging)]
     R --> E3[(production)]
 ```
 
-| Workflow             | Trigger                                   | What it does                                                                |
-| -------------------- | ----------------------------------------- | --------------------------------------------------------------------------- |
-| `ci.yml`             | Push or pull request to `main` / `dev`    | Lint, format check, tests, then builds and smoke tests the production image |
-| `deploy-dev.yml`     | Push to `dev`                             | Deploys the pushed commit to **development**                                |
-| `release-deploy.yml` | Push of a version tag                     | Deploys `vX.Y.Z-rc.N` to **staging**, `vX.Y.Z` to **production**            |
-| `manual-deploy.yml`  | Manual (Actions → manual-deploy → Run)    | Deploys any branch, tag or commit to the environment you pick               |
-| `_deploy.yml`        | Called by the three deploy workflows only | The shared deploy job                                                       |
+| Workflow                                  | Trigger                                                      | What it does                                                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`                                  | Push or pull request to `main` / `dev`                       | Lint, format check, tests, then builds and smoke tests the production image                                   |
+| `deploy-dev.yml`                          | Push to `dev`                                                | Deploys the pushed commit to **development**                                                                  |
+| `manual-deploy.yml`                       | Manual (Actions → manual-deploy → Run)                       | Deploys any branch, tag or commit to the environment you pick                                                 |
+| `create-release.yml`                      | Manual (Actions → create-release → Run)                      | Creates branch `release/vX.Y.Z` from `dev` with the version bumped in `package.json`                          |
+| `create-patch.yml`                        | Manual (Actions → create-patch → Run)                        | Creates branch `patch/vX.Y.Z` from `main` with the patch version bumped in `package.json`                     |
+| `deploy-release-candidate-to-staging.yml` | Manual (Actions → deploy-release-candidate-to-staging → Run) | Tags the head of `release/vX.Y.Z` or `patch/vX.Y.Z` as the next `vX.Y.Z-rc.N` and deploys it to **staging**   |
+| `deploy-release-to-production.yml`        | Manual (Actions → deploy-release-to-production → Run)        | Fast-forwards `main` to `release/vX.Y.Z` or `patch/vX.Y.Z`, tags it `vX.Y.Z` and deploys it to **production** |
+| `_deploy.yml`                             | Called by the four deploy workflows only                     | The shared deploy job                                                                                         |
 
 ### CI (`ci.yml`)
 
@@ -139,17 +144,6 @@ Deploys to the same environment never overlap: they share the `deploy-<environme
 
 Every push to `dev` deploys that commit to **development** with image tag `dev-<commit sha>`. It does not wait for CI.
 
-### Releases (`release-deploy.yml`)
-
-Pushing a version tag deploys it; the image tag is the git tag.
-
-```bash
-git tag v1.2.3-rc.1 && git push origin v1.2.3-rc.1   # -> staging
-git tag v1.2.3 && git push origin v1.2.3             # -> production
-```
-
-Tags that don't match `vX.Y.Z` or `vX.Y.Z-rc.N` don't trigger a deploy.
-
 ### Manual deploy (`manual-deploy.yml`)
 
 Actions → **manual-deploy** → **Run workflow**, then choose:
@@ -159,29 +153,90 @@ Actions → **manual-deploy** → **Run workflow**, then choose:
 
 A **validate** job runs first on the target environment's runner. It rejects refs with characters outside `A-Z a-z 0-9 . _ / -`, then asks the GitHub API to resolve the ref to a full commit SHA and fails if no branch, tag or commit matches. The deploy then checks out that exact SHA, so a push to the branch while the run is queued doesn't change what gets deployed. The image tag is the ref with any character Docker doesn't allow replaced by `-` (e.g. `feature/x` → `feature-x`).
 
+### Create a release (`create-release.yml`)
+
+Actions → **create-release** → **Run workflow**, then choose **release_type**: `minor` or `major`.
+
+1. Checks out `dev` with all tags and finds the last final release tag (`vX.Y.Z`; `-rc.N` tags are ignored, `v0.0.0` if there is none).
+2. Increments it: `minor` → `vX.(Y+1).0`, `major` → `v(X+1).0.0` (e.g. `v1.0.5` → `v1.1.0` or `v2.0.0`).
+3. Fails if that tag, or a branch `release/vX.Y.Z` or `patch/vX.Y.Z`, already exists.
+4. Creates `release/vX.Y.Z` from `dev`, sets the version in `package.json` and `package-lock.json` with `npm version`, commits it as `chore(release): vX.Y.Z` and pushes the branch.
+
+It runs on the CI runner and needs `contents: write` (set in the file). The branch only prepares the release: deploy it to staging with `deploy-release-candidate-to-staging.yml`, then merge it into `main` and deploy it to production with `deploy-release-to-production.yml`.
+
+### Create a patch (`create-patch.yml`)
+
+Actions → **create-patch** → **Run workflow** (no inputs). Works like `create-release.yml`, but for fixes to what is already released:
+
+1. Checks out `main` with all tags and finds the last final release tag (`vX.Y.Z`, ignoring `-rc.N`).
+2. Increments the patch number: `v1.0.5` → `v1.0.6`.
+3. Fails if that tag, or a branch `patch/vX.Y.Z` or `release/vX.Y.Z`, already exists.
+4. Creates `patch/vX.Y.Z` from `main`, sets the version with `npm version`, commits it as `chore(release): vX.Y.Z` and pushes the branch.
+
+Both workflows share one concurrency group, so a release and a patch are never computed at the same time.
+
+### Deploy a release candidate (`deploy-release-candidate-to-staging.yml`)
+
+Actions → **deploy-release-candidate-to-staging** → **Run workflow**, then enter **version**, e.g. `v1.1.0` (`1.1.0` also works).
+
+1. **tag** job (CI runner):
+   - Fails if the version isn't `vX.Y.Z` or if the final tag `vX.Y.Z` already exists (already released).
+   - Finds the branch for the version: `release/vX.Y.Z` or `patch/vX.Y.Z`. Fails if neither or both exist.
+   - Fails if the branch's latest commit already has a `vX.Y.Z-rc.N` tag: there is nothing new to deploy. Push new commits first, or redeploy that tag with `manual-deploy.yml`.
+   - Finds the highest existing candidate `vX.Y.Z-rc.N` and uses `N + 1` (`rc.1` for the first one).
+   - Creates an annotated tag on the branch's latest commit and pushes it.
+2. **deploy** job: deploys that commit to **staging** through `_deploy.yml`, with the rc tag as the image tag.
+
+The tag job shares the concurrency group with `create-release.yml`, `create-patch.yml` and `deploy-release-to-production.yml`, so two runs never pick the same candidate number; the deploy itself queues in `deploy-staging` like every other staging deploy.
+
+### Deploy a release to production (`deploy-release-to-production.yml`)
+
+Actions → **deploy-release-to-production** → **Run workflow**, then enter **version**, e.g. `v1.1.0`.
+
+1. **release** job (CI runner) checks that the release can go out, and fails with a clear error otherwise:
+   - The version is `vX.Y.Z` and the tag `vX.Y.Z` doesn't exist yet.
+   - Exactly one of `release/vX.Y.Z` and `patch/vX.Y.Z` exists.
+   - The branch's latest commit has a `vX.Y.Z-rc.N` tag, i.e. that exact commit was deployed to staging with `deploy-release-candidate-to-staging.yml`.
+   - `main` can be fast-forwarded to the branch: every commit on `main` is already in the branch. If not, merge or rebase `main` into the branch and deploy a new release candidate.
+
+   Then it runs `git merge --ff-only` of the branch into `main`, creates the annotated tag `vX.Y.Z` on it and pushes `main` and the tag together (`git push --atomic`, so neither is pushed if the other is rejected).
+
+2. **deploy** job: deploys that commit to **production** through `_deploy.yml`, with `vX.Y.Z` as the image tag. The `production` environment's protection rules (e.g. required reviewers) apply here.
+
+Because `main` is fast-forwarded, production runs exactly the commit that was tested on staging. The built-in token pushes directly to `main`, so a branch protection rule on `main` that requires pull requests must allow GitHub Actions to bypass it. Pushes made with the built-in token don't trigger `ci.yml`.
+
+### Release flow
+
+```text
+create-release (minor/major from dev)  ─┐
+create-patch   (patch from main)       ─┴─> release/vX.Y.Z or patch/vX.Y.Z
+  -> deploy-release-candidate-to-staging  (tag vX.Y.Z-rc.N, deploy to staging; repeat after each fix)
+  -> deploy-release-to-production         (fast-forward main, tag vX.Y.Z, deploy to production)
+```
+
 ### Setup
 
 Everything the pipeline needs outside the code: runners, repository variables, environments and env files.
 
 #### Overview
 
-| Environment   | Deployed by                  | Runner variable      | Image tag           | Env file             |
-| ------------- | ---------------------------- | -------------------- | ------------------- | -------------------- |
-| `development` | push to `dev`, manual        | `DEVELOPMENT_RUNNER` | `dev-<sha>` or ref  | `ENV_FILE` (env var) |
-| `staging`     | tag `vX.Y.Z-rc.N`, manual    | `STAGING_RUNNER`     | git tag or ref      | `ENV_FILE` (env var) |
-| `production`  | tag `vX.Y.Z`, manual         | `PRODUCTION_RUNNER`  | git tag or ref      | `ENV_FILE` (env var) |
-| _(none)_ CI   | push / PR to `main` or `dev` | `CI_RUNNER`          | `<sha>`, `ci-<sha>` | not used             |
+| Environment   | Deployed by                                       | Runner variable      | Image tag           | Env file             |
+| ------------- | ------------------------------------------------- | -------------------- | ------------------- | -------------------- |
+| `development` | push to `dev`, manual                             | `DEVELOPMENT_RUNNER` | `dev-<sha>` or ref  | `ENV_FILE` (env var) |
+| `staging`     | `deploy-release-candidate-to-staging.yml`, manual | `STAGING_RUNNER`     | git tag or ref      | `ENV_FILE` (env var) |
+| `production`  | `deploy-release-to-production.yml`, manual        | `PRODUCTION_RUNNER`  | git tag or ref      | `ENV_FILE` (env var) |
+| _(none)_ CI   | push / PR to `main` or `dev`                      | `CI_RUNNER`          | `<sha>`, `ci-<sha>` | not used             |
 
 #### Runners
 
 Every job runs on a self-hosted runner and requires three labels: `self-hosted`, `linux`, and a custom label whose value is stored in a repository variable.
 
-| Runner      | Label comes from     | Runs                                                         |
-| ----------- | -------------------- | ------------------------------------------------------------ |
-| CI          | `CI_RUNNER`          | `ci.yml` (checks and build jobs)                             |
-| Development | `DEVELOPMENT_RUNNER` | deploys to development, and the manual `validate` job for it |
-| Staging     | `STAGING_RUNNER`     | deploys to staging, and the manual `validate` job for it     |
-| Production  | `PRODUCTION_RUNNER`  | deploys to production, and the manual `validate` job for it  |
+| Runner      | Label comes from     | Runs                                                                                                                                                                              |
+| ----------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CI          | `CI_RUNNER`          | `ci.yml` (checks and build jobs), `create-release.yml`, `create-patch.yml`, `deploy-release-candidate-to-staging.yml` (tag job), `deploy-release-to-production.yml` (release job) |
+| Development | `DEVELOPMENT_RUNNER` | deploys to development, and the manual `validate` job for it                                                                                                                      |
+| Staging     | `STAGING_RUNNER`     | deploys to staging, and the manual `validate` job for it                                                                                                                          |
+| Production  | `PRODUCTION_RUNNER`  | deploys to production, and the manual `validate` job for it                                                                                                                       |
 
 The runner **is** the deploy target: the app is started with Docker Compose on the machine the runner lives on. One machine can host several runners/labels, but each environment then needs its own `APP_PORT` and `ENV`.
 
@@ -208,17 +263,17 @@ Notes:
 
 Settings → Secrets and variables → Actions → **Variables** tab → Repository variables.
 
-| Variable             | Required by                               | Example             | Meaning                         |
-| -------------------- | ----------------------------------------- | ------------------- | ------------------------------- |
-| `CI_APP_NAME`        | `ci.yml`                                  | `ci-cd-example`     | Image name for CI builds        |
-| `CI_RUNNER`          | `ci.yml`                                  | `ci-runner`         | Label of the CI runner          |
-| `DEVELOPMENT_RUNNER` | `deploy-dev.yml`, `manual-deploy.yml`     | `dev-runner`        | Label of the development runner |
-| `STAGING_RUNNER`     | `release-deploy.yml`, `manual-deploy.yml` | `staging-runner`    | Label of the staging runner     |
-| `PRODUCTION_RUNNER`  | `release-deploy.yml`, `manual-deploy.yml` | `production-runner` | Label of the production runner  |
+| Variable             | Required by                                                                                                                       | Example             | Meaning                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------- |
+| `CI_APP_NAME`        | `ci.yml`                                                                                                                          | `ci-cd-example`     | Image name for CI builds        |
+| `CI_RUNNER`          | `ci.yml`, `create-release.yml`, `create-patch.yml`, `deploy-release-candidate-to-staging.yml`, `deploy-release-to-production.yml` | `ci-runner`         | Label of the CI runner          |
+| `DEVELOPMENT_RUNNER` | `deploy-dev.yml`, `manual-deploy.yml`                                                                                             | `dev-runner`        | Label of the development runner |
+| `STAGING_RUNNER`     | `deploy-release-candidate-to-staging.yml`, `manual-deploy.yml`                                                                    | `staging-runner`    | Label of the staging runner     |
+| `PRODUCTION_RUNNER`  | `deploy-release-to-production.yml`, `manual-deploy.yml`                                                                           | `production-runner` | Label of the production runner  |
 
 The runner variables must be **repository** variables, not environment variables: `runs-on` is resolved before the job enters its environment. An unset runner variable leaves the job waiting forever for a runner with an empty label.
 
-No secrets are used. Workflows only need the built-in `GITHUB_TOKEN` with `contents: read` (set in each file); the manual `validate` job uses it to resolve the ref through the GitHub API.
+No secrets are used. Workflows only need the built-in `GITHUB_TOKEN`, with the permissions set in each file (`contents: read` for CI and deploys, `contents: write` to push branches, tags and `main`); the manual `validate` job uses it to resolve the ref through the GitHub API.
 
 #### Environments
 

@@ -1,0 +1,85 @@
+name: create-patch
+
+on:
+  workflow_dispatch:
+
+run-name: Create patch release
+
+permissions:
+  contents: write
+
+concurrency:
+  group: create-release # shared by create-release, create-patch, deploy-release-candidate-to-staging and deploy-release-to-production so versions and tags are never computed twice at once
+  cancel-in-progress: false
+
+jobs:
+  create-patch:
+    name: Create patch branch from main
+    runs-on: [self-hosted, linux, '${{ vars.CI_RUNNER }}']
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0 # full history and all tags
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Compute new version
+        id: version
+        run: |
+          # Last final release tag (vX.Y.Z); release candidates (-rc.N) are ignored
+          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          last=${last:-v0.0.0}
+          IFS=. read -r major minor patch <<< "${last#v}"
+
+          version="$major.$minor.$((patch + 1))"
+          branch="patch/v$version"
+
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::Tag v$version already exists"
+            exit 1
+          fi
+          # A version has one branch: either release/vX.Y.Z or patch/vX.Y.Z, never both
+          existing=$(git ls-remote --heads origin "release/v$version" "patch/v$version" | sed 's|.*refs/heads/||')
+          if [ -n "$existing" ]; then
+            echo "::error::Branch $(echo "$existing" | head -n 1) already exists for v$version"
+            exit 1
+          fi
+
+          echo "Last version: $last -> new version: v$version (patch)"
+          {
+            echo "version=$version"
+            echo "branch=$branch"
+            echo "last=$last"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create patch branch
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          git switch -c "$BRANCH"
+          # Updates package.json and package-lock.json, without creating a tag
+          npm version "$VERSION" --no-git-tag-version
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "chore(release): v$VERSION"
+          git push origin "$BRANCH"
+
+      - name: Summary
+        env:
+          LAST: ${{ steps.version.outputs.last }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          {
+            echo "### Patch v$VERSION"
+            echo
+            echo "| | |"
+            echo "|-|-|"
+            echo "| Last version | \`$LAST\` |"
+            echo "| New version | \`v$VERSION\` |"
+            echo "| Branch | \`$BRANCH\` (from \`main\`) |"
+          } >> "$GITHUB_STEP_SUMMARY"
