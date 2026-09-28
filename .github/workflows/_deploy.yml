@@ -1,6 +1,6 @@
 name: _deploy
 
-# Reusable deploy job, called by release-deploy.yml, deploy-dev.yml and manual-deploy.yml
+# Reusable deploy job, called by deploy-dev.yml, deploy-release-candidate-to-staging.yml, deploy-release-to-production.yml and manual-deploy.yml
 
 on:
   workflow_call:

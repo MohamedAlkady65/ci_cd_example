@@ -1,0 +1,101 @@
+name: deploy-release-candidate-to-staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to deploy as a release candidate (e.g. v1.1.0)
+        type: string
+        required: true
+
+run-name: Deploy release candidate of ${{ inputs.version }} to staging
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: Tag release candidate of ${{ inputs.version }}
+    runs-on: [self-hosted, linux, '${{ vars.CI_RUNNER }}']
+    permissions:
+      contents: write
+    concurrency:
+      group: create-release # shared by create-release, create-patch, deploy-release-candidate-to-staging and deploy-release-to-production so versions and tags are never computed twice at once
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # all branches and tags
+
+      - name: Create release candidate tag
+        id: tag
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="v${INPUT_VERSION#v}"
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version '$INPUT_VERSION': expected vMajor.Minor.Patch (e.g. v1.1.0)"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::$version is already released (tag $version exists)"
+            exit 1
+          fi
+
+          # The version must have exactly one branch: release/vX.Y.Z or patch/vX.Y.Z
+          mapfile -t branches < <(git ls-remote --heads origin "release/$version" "patch/$version" | sed 's|.*refs/heads/||')
+          if [ "${#branches[@]}" -eq 0 ]; then
+            echo "::error::No branch release/$version or patch/$version found"
+            exit 1
+          fi
+          if [ "${#branches[@]}" -gt 1 ]; then
+            echo "::error::Both release/$version and patch/$version exist; delete one"
+            exit 1
+          fi
+          branch=${branches[0]}
+          sha=$(git rev-parse "origin/$branch")
+
+          # Nothing new to deploy if the branch head is already a candidate of this version
+          existing=$(git tag --points-at "$sha" | grep -E "^${version//./\\.}-rc\.[0-9]+$" | sort -V | tail -n 1 || true)
+          if [ -n "$existing" ]; then
+            echo "::error::Latest commit of $branch ($sha) is already tagged $existing; push new commits first, or redeploy it with manual-deploy"
+            exit 1
+          fi
+
+          # Next candidate number: highest existing vX.Y.Z-rc.N + 1 (starts at 1)
+          last_rc=$(git tag -l "$version-rc.*" | sed -n "s/^${version//./\\.}-rc\.\([0-9][0-9]*\)$/\1/p" | sort -n | tail -n 1)
+          tag="$version-rc.$(( ${last_rc:-0} + 1 ))"
+          previous=${last_rc:+$version-rc.$last_rc}
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$tag" "$sha" -m "Release candidate $tag"
+          git push origin "refs/tags/$tag"
+
+          echo "Tagged $branch ($sha) as $tag"
+          {
+            echo "tag=$tag"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release candidate $tag"
+            echo
+            echo "| | |"
+            echo "|-|-|"
+            echo "| Branch | \`$branch\` |"
+            echo "| Commit | \`$sha\` |"
+            echo "| Previous candidate | \`${previous:-none}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Deploy the tagged commit
+  deploy:
+    needs: tag
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: staging
+      ref: ${{ needs.tag.outputs.sha }}
+      image_tag: ${{ needs.tag.outputs.tag }}

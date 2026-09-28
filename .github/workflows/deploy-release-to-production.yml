@@ -1,0 +1,116 @@
+name: deploy-release-to-production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to deploy to production (e.g. v1.1.0)
+        type: string
+        required: true
+
+run-name: Deploy ${{ inputs.version }} to production
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Merge ${{ inputs.version }} into main and tag it
+    runs-on: [self-hosted, linux, '${{ vars.CI_RUNNER }}']
+    permissions:
+      contents: write
+    concurrency:
+      group: create-release # shared by create-release, create-patch, deploy-release-candidate-to-staging and deploy-release-to-production so versions and tags are never computed twice at once
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0 # all branches and tags
+
+      - name: Check release can be merged
+        id: check
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="v${INPUT_VERSION#v}"
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version '$INPUT_VERSION': expected vMajor.Minor.Patch (e.g. v1.1.0)"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::$version is already released (tag $version exists)"
+            exit 1
+          fi
+
+          # The version must have exactly one branch: release/vX.Y.Z or patch/vX.Y.Z
+          mapfile -t branches < <(git ls-remote --heads origin "release/$version" "patch/$version" | sed 's|.*refs/heads/||')
+          if [ "${#branches[@]}" -eq 0 ]; then
+            echo "::error::No branch release/$version or patch/$version found"
+            exit 1
+          fi
+          if [ "${#branches[@]}" -gt 1 ]; then
+            echo "::error::Both release/$version and patch/$version exist; delete one"
+            exit 1
+          fi
+          branch=${branches[0]}
+          sha=$(git rev-parse "origin/$branch")
+
+          # The exact commit being released must have been deployed to staging as a release candidate
+          rc=$(git tag --points-at "$sha" | grep -E "^${version//./\\.}-rc\.[0-9]+$" | sort -V | tail -n 1 || true)
+          if [ -z "$rc" ]; then
+            echo "::error::Latest commit of $branch ($sha) has no $version-rc.N tag; deploy it to staging with deploy-release-candidate-to-staging first"
+            exit 1
+          fi
+
+          # --ff-only is only possible when main has no commits missing from the branch
+          if ! git merge-base --is-ancestor origin/main "$sha"; then
+            echo "::error::Cannot fast-forward main to $branch: main has commits that are not in $branch. Merge or rebase main into $branch, then deploy a new release candidate"
+            exit 1
+          fi
+
+          echo "Releasing $branch ($sha, tested as $rc) as $version"
+          {
+            echo "tag=$version"
+            echo "sha=$sha"
+            echo "branch=$branch"
+            echo "rc=$rc"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Merge into main, tag and push
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+          SHA: ${{ steps.check.outputs.sha }}
+          BRANCH: ${{ steps.check.outputs.branch }}
+          RC: ${{ steps.check.outputs.rc }}
+        run: |
+          git merge --ff-only "origin/$BRANCH"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" "$SHA" -m "Release $TAG"
+
+          # Atomic: main and the tag are pushed together or not at all
+          git push --atomic origin main "refs/tags/$TAG"
+
+          {
+            echo "### Release $TAG"
+            echo
+            echo "| | |"
+            echo "|-|-|"
+            echo "| Branch | \`$BRANCH\` |"
+            echo "| Commit | \`$SHA\` |"
+            echo "| Release candidate | \`$RC\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: release
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: production
+      ref: ${{ needs.release.outputs.sha }}
+      image_tag: ${{ needs.release.outputs.tag }}
