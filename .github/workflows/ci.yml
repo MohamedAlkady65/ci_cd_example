@@ -1,10 +1,8 @@
 name: ci
 
 on:
-  push:
-    branches: [main, dev]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, 'release/v*', 'patch/v*']
 
 permissions:
   contents: read

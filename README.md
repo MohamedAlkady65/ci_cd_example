@@ -86,7 +86,7 @@ When adding a setting, keep this split: if it differs between environments, put 
 
 ```mermaid
 flowchart LR
-    PR[Push / PR to main or dev] --> CI[ci.yml<br/>lint, format, test, smoke test]
+    PR[Pull request to main, dev,<br/>release/v* or patch/v*] --> CI[ci.yml<br/>lint, format, test, smoke test]
     DEV[Push to dev] --> DD[deploy-dev.yml]
     RC[Manual run] --> DRC[deploy-release-candidate-to-staging.yml<br/>tag vX.Y.Z-rc.N]
     REL[Manual run] --> DRL[deploy-release-to-production.yml<br/>merge to main, tag vX.Y.Z]
@@ -102,7 +102,7 @@ flowchart LR
 
 | Workflow                                  | Trigger                                                      | What it does                                                                                                  |
 | ----------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                                  | Push or pull request to `main` / `dev`                       | Lint, format check, tests, then builds and smoke tests the production image                                   |
+| `ci.yml`                                  | Pull request to `main`, `dev`, `release/v*` or `patch/v*`    | Lint, format check, tests, then builds and smoke tests the production image                                   |
 | `deploy-dev.yml`                          | Push to `dev`                                                | Deploys the pushed commit to **development**                                                                  |
 | `manual-deploy.yml`                       | Manual (Actions → manual-deploy → Run)                       | Deploys any branch, tag or commit to the environment you pick                                                 |
 | `create-release.yml`                      | Manual (Actions → create-release → Run)                      | Creates branch `release/vX.Y.Z` from `dev` with the version bumped in `package.json`                          |
@@ -113,7 +113,7 @@ flowchart LR
 
 ### CI (`ci.yml`)
 
-Runs on the runner labelled with the `CI_RUNNER` variable. A new push to the same ref cancels the previous run.
+Runs on every pull request to `main`, `dev`, `release/v*` or `patch/v*`, and not on pushes: every change reaches those branches through a pull request, so it is checked before it lands. It uses the runner labelled with the `CI_RUNNER` variable; a new push to the pull request cancels the previous run.
 
 1. **checks**: builds the `ci` Docker target and runs `lint:check`, `format:check` and `test` inside it.
 2. **build** (after checks pass): builds the `production` target, starts it on port 3000 and calls `POST /sum` with `{"a":2,"b":3}`, expecting `{"result":5}`. Logs are printed and the container is removed whatever the result.
@@ -203,7 +203,7 @@ Actions → **deploy-release-to-production** → **Run workflow**, then enter **
 
 2. **deploy** job: deploys that commit to **production** through `_deploy.yml`, with `vX.Y.Z` as the image tag. The `production` environment's protection rules (e.g. required reviewers) apply here.
 
-Because `main` is fast-forwarded, production runs exactly the commit that was tested on staging. The built-in token pushes directly to `main`, so a branch protection rule on `main` that requires pull requests must allow GitHub Actions to bypass it. Pushes made with the built-in token don't trigger `ci.yml`.
+Because `main` is fast-forwarded, production runs exactly the commit that was tested on staging. The built-in token pushes directly to `main`, so a branch protection rule on `main` that requires pull requests must allow GitHub Actions to bypass it.
 
 ### Release flow
 
@@ -227,7 +227,7 @@ Everything the pipeline needs outside the code: runners, repository variables, e
 | `development` | push to `dev`, manual                             | `DEVELOPMENT_RUNNER` | `dev-<sha>` or ref  | `ENV_FILE` (env var) |
 | `staging`     | `deploy-release-candidate-to-staging.yml`, manual | `STAGING_RUNNER`     | git tag or ref      | `ENV_FILE` (env var) |
 | `production`  | `deploy-release-to-production.yml`, manual        | `PRODUCTION_RUNNER`  | git tag or ref      | `ENV_FILE` (env var) |
-| _(none)_ CI   | push / PR to `main` or `dev`                      | `CI_RUNNER`          | `<sha>`, `ci-<sha>` | not used             |
+| _(none)_ CI   | pull requests                                     | `CI_RUNNER`          | `<sha>`, `ci-<sha>` | not used             |
 
 #### Runners
 
