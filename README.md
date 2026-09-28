@@ -69,7 +69,7 @@ All workflows live in `.github/workflows/` and run on **self-hosted Linux runner
 
 ### Design principle: minimal per-environment configuration
 
-The pipeline is intentionally built so that config per environment differ as little as possible and centerlized in few places. Configuration lives in exactly three places:
+The pipeline is intentionally built so that environments differ as little as possible, with configuration centralized in exactly three places:
 
 | Where                              | What                                                                  | Changes                 |
 | ---------------------------------- | --------------------------------------------------------------------- | ----------------------- |
@@ -162,7 +162,7 @@ Actions → **create-release** → **Run workflow**, then choose **release_type*
 3. Fails if that tag, or a branch `release/vX.Y.Z` or `patch/vX.Y.Z`, already exists.
 4. Creates `release/vX.Y.Z` from `dev`, sets the version in `package.json` and `package-lock.json` with `npm version`, commits it as `chore(release): vX.Y.Z` and pushes the branch.
 
-It runs on the CI runner and needs `contents: write` (set in the file). The branch only prepares the release: deploy it to staging with `deploy-release-candidate-to-staging.yml`, then merge it into `main` and deploy it to production with `deploy-release-to-production.yml`.
+It runs on the CI runner and needs `contents: write` (set in the file). The branch only prepares the release: deploy it to staging with `deploy-release-candidate-to-staging.yml`, then to production with `deploy-release-to-production.yml`, which also merges it into `main`.
 
 ### Create a patch (`create-patch.yml`)
 
@@ -173,7 +173,7 @@ Actions → **create-patch** → **Run workflow** (no inputs). Works like `creat
 3. Fails if that tag, or a branch `patch/vX.Y.Z` or `release/vX.Y.Z`, already exists.
 4. Creates `patch/vX.Y.Z` from `main`, sets the version with `npm version`, commits it as `chore(release): vX.Y.Z` and pushes the branch.
 
-Both workflows share one concurrency group, so a release and a patch are never computed at the same time.
+`create-release.yml`, `create-patch.yml`, `deploy-release-candidate-to-staging.yml` and `deploy-release-to-production.yml` share one concurrency group, so versions and tags are never computed by two runs at the same time.
 
 ### Deploy a release candidate (`deploy-release-candidate-to-staging.yml`)
 
@@ -214,6 +214,8 @@ create-patch   (patch from main)       ─┴─> release/vX.Y.Z or patch/vX.Y.Z
   -> deploy-release-to-production         (fast-forward main, tag vX.Y.Z, deploy to production)
 ```
 
+Till now, nothing merges the release or patch branch back into `dev`. Commits made on it (including the `package.json` version bump) reach only `main`, so merge `main` into `dev` after a release.
+
 ### Setup
 
 Everything the pipeline needs outside the code: runners, repository variables, environments and env files.
@@ -253,7 +255,7 @@ Each runner machine needs:
 - The runner's user in the `docker` group
 - `git` and `curl` (`curl` is used by the CI smoke test and by the manual `validate` job)
 - Deploy runners: the env file at the path set in the environment's `ENV_FILE`, readable by the runner user
-- CI runner: port `3000` free (the smoke test publishes it and names its container `app`)
+- CI runner: port `3000` free (the smoke test publishes it and names its container `app`), and internet access for `actions/setup-node`, which downloads Node 24 for `create-release.yml` and `create-patch.yml`
 
 Notes:
 
@@ -304,7 +306,7 @@ Only environments that exist in the repo appear in the manual deploy dropdown. A
 One file per environment, stored on its runner machine outside the repository (at the `ENV_FILE` path), following `.env.example`:
 
 ```bash
-ENV=production          # compose project and container name become <APP_NAME>-<ENV>
+ENV=production          # compose project name becomes <APP_NAME>-<ENV>
 APP_NAME=ci-cd-example  # also the image name: <APP_NAME>-<ENV>:<IMAGE_TAG>
 APP_PORT=3000           # host port mapped to the container's 3000
 ```
