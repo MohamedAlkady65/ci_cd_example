@@ -1,6 +1,6 @@
 {
   "name": "ci-cd-example",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Minimal Express API used as an example for CI/CD setup",
   "main": "src/server.js",
   "scripts": {
